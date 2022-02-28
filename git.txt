@@ -1,0 +1,63 @@
+1安装好git后可以通过 git --version来判断是否成功。 
+
+2 通过  $ git config --global user.name "Your Name"
+     $ git config --global user.email "email@example.com"  对电脑上的所有仓库配置姓名和email 。
+
+3 通过在一个文件夹  git init 来初始化一个可以被git管理的仓库
+
+4 git add 文件名  或者git add .    把某文件 或者此文件夹下的所有有改动的文件提交到仓库
+   git commit - m "本次提交说明"  
+
+5 通过git log可以找到所有的版本记录，通过对应的commit_id   可以使用git  reset --hard commit_id 来切换版本。
+
+6 回退之后如果要重新切换到未来版本 可以通过git reflog 确定未来的版本号（commit_id）
+
+7 git init之后的文件夹下就是工作区，工作区里面有一个隐藏文件.git，.git是git的版本库,.git里面有很多东西包括 
+                     1）git自动为我们创建第一个分支master,以及指向master的一个指针叫HEAD。 
+                     2)  stage暂存区
+   所以git add 就是把某文件加到stage, git commit就是把暂存区的修改提交到当前分支 。
+
+8 使用git diff HEAD -- 文件名 可以查看此文件的工作区版本与版本库里面最新版本的区别
+
+9场景1：当你改乱了工作区某个文件的内容，想直接丢弃工作区的修改时，用命令git checkout -- file。
+  场景2：当你不但改乱了工作区某个文件的内容，还添加到了暂存区时，想丢弃修改，分两步，第一步用命令git reset HEAD <file>，就回到了场景1，第二步按场景1操作。
+  场景3：已经提交了不合适的修改到版本库时，想要撤销本次提交，参考版本回退一节，不过前提是没有推送到远程库。
+
+10   场景：在github上创建一个空的仓库，把本地项目提交到远程：
+      通过 git remote add origin git@server-name:path/repo-name.git 关联远程库
+      git push -u origin master    把当前分支推送到远程分支master   -u 把当前分支与远程分支master 关联起来
+
+11 场景 ：从远程仓库拉取代码
+    git clone
+
+12 1通过ssh-keygen -t rsa -C "youremail@example.com" 可以在.ssh目录里面  ：里面有id_rsa和id_rsa.pub两个文件
+    第2步：登陆GitHub，打开“Account settings”，“SSH Keys”页面：
+    然后，点“Add SSH Key”，填上任意Title，在Key文本框里粘贴id_rsa.pub文件的内容   。  
+
+13 创建与合并分支
+     查看分支 git branch 
+     创建分支  git branch name
+     切换分支  git checkout name 或者 git switch name
+     创建+切换 git checkout -b name  或者 git switch -c name
+     合并某分支到当前分支  git merge name
+     删除分支 git branch -d name 
+
+14 解决冲突
+     git merge 分支名     合并某分支到当前分支可能会出现冲突，找到冲突的位置，手动解决冲突并且再次提交。
+
+15 分支管理策略，发版本在主分支，新建开发分支开始任务，任务完成merge到主分支。
+
+16 多人开发：  
+    首先，可以试图用git push origin <branch-name>推送自己的修改；
+    如果推送失败，则因为远程分支比你的本地更新，需要先用git pull试图合并；
+    如果合并有冲突，则解决冲突，并在本地提交；
+    没有冲突或者解决掉冲突后，再用git push origin <branch-name>推送就能成功！
+     如果git pull提示no tracking information，则说明本地分支和远程分支的链接关系没有创建，用命令git branch --set-upstream-to <branch-name> origin/<branch-name>。
+     查看远程库信息  git remote -v 
+     可以通过git clone 拉取代码后 使用  git checkout -b  branch-name origin/branch-name 在本地创建和远程分支对应的分支。
+     建立本地分支和远程分支的关联  使用 git branch --set-upstream branch-name origin/branch-name；
+     从远程拉取代码 使用 git pull 
+     从本地分支推送至远程  git push origin branch-name
+
+
+ 

@@ -1,0 +1,24 @@
+dart语法：
+支持闭包
+var:定义变量。声明变量，dart会自动推导出数据类型。
+dynamic标识动态类型，编译期不进行任何的类型检查，而是运行时候检查。
+没有float.
+只有bool可以用于if等判断。
+switch支持String。
+final和const表示常量，const编译期确定值，final值运行时确定。
+所有基础类型和类都继承Object，默认是NULL，自带getter和setter。
+数组等于java中的列表
+方法可以设置参数默认值，没有public,private,_代表java中private.有@protected注解。
+类的构造函数只能有一个，通过empty创建一个空仓书的类。
+支持async/await ,最终编译为Flutter里面返回的Future对象，通过then执行下一步。
+
+widget
+在flutter中每个页面就是一帧，无状态就是保持在那一帧。有状态的Widget数据更新时候，是创建了新的Widget,只是State实现了
+跨帧的数据保存。
+无状态statelesswidget，通过build方法构建控件
+有状态statefulwidget，里面主要做的是创建和管理State,通过State的build方法去构建控件。
+State类里面主要周期：通过构造方法创建；
+                                  initState初始化；  
+                                  didChangeDependencies：在 initState 之后调用，此时可以获取其他 State 
+                                  build方法返回UI
+                                  dispose销毁

@@ -1,0 +1,36 @@
+1变量定义：
+var/val 变量名：变量类型 =变量值
+var定义变量；
+val定义不可变变量；
+
+2函数定义：
+fun 方法名字（参数名：类型 ...）返回值类型{
+ ...方法体 
+}
+
+3Null检查机制：
+var str:String?="123" ?表示此变量可以为null;
+str?.length   因为被?.修饰，所以str为空会返回null，不会报空指针错误；
+str!!.lenght   str为空会报空指针错误；
+is 相当于java instanceof
+
+4数组：
+var array=arrayof(1,2,3);
+var array1 = Array(3,{i->i*2})//定义数组 [0,2,4]
+var arrayOfNulls = arrayOfNulls<Int>(6)  //创建一个容量为6的Int 空数组
+
+5条件控制
+kotlin的If表达式是有返回值的的；
+when相当于java中的switch，else相当于defult
+for循环可以对任何提供迭代器的(iterator)对象进行遍历，语法如下for (item in collection) print(item)
+
+6类和对象
+6.1kotlin类具有俩个构造函数，一个主构造函数，一个次构造函数；
+6.2主构造函数是类头的一部分他跟在类名后,构造函数的关键字为constructor
+ class Person constructor(firstName: String) { /*……*/ }
+6.3主构造函数不能包含任何的代码快，初始化代码可以放到init关键字的代码块中进行初始化，主构造函数的参数可以再init代码块中使用，也可以应用于类的成员属性的赋值
+6.4如果类有一个主构造函数，每一个次构造函数都需要委托给主构造函数，可以直接委托，后者通过其他构造函数间接委托，委托到同一个类的另一个构造函数，需要用到this关键字
+init代码块会在次构造函数之前执行；
+6.5 实例化对象不需要new关键字；
+6.6//要位于顶层 const val aaa :String  = "aa"//相当于java public static final  String aaa = "aa"
+6.7内部类用inner关键字来表示,内部类会带，带有外部类的引用，相当于java中的普通内部类

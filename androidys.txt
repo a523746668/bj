@@ -1,0 +1,729 @@
+图片处理
+应用场景是指加载图片到手机屏幕上。
+内存=图片长度的像素x图片宽度的像素x单位像素占用的字节数
+单位像素的字节数主要被位图格式决定
+ARGB_8888  32bit/像素  1byte=8bit 等同于 1个字节=8位
+RGB_565  16bit/像素
+ARGB_4444  16bit/像素
+ALPHA_8  8bit/像素
+所以在android里面要减少图片bitmap所占的内存 主要是缩放长宽或者改变位图格式。
+具体缩放实现 是使用BitmapFatory.Option.inSampleSize属性，也可以配合（inScaled、inDensity、inTargetDensity。
+(inSampleSize小于等于1会按照1处理,inSampleSize只能设置为2的平方，不是2的平方则最终会减小到最近的2的平方数，如设置7会按4进行压缩，设置15会按8进行压缩。)
+图片在磁盘的大小:
+应用场景图片压缩上传。
+质量压缩， bitmap.compress(format,quality,outputstream)，改变quality的大小，
+0-100之间，数值越小质量越差。质量压缩的原理是通过改变图片的位深和透明度来减小图片占用的磁盘空间大小。
+采样率压缩   设置inSampleSize 
+图片的缓存处理 ：1 首次加载的图片通过网络下载，获取到图片后保存到内存和磁盘里面去 
+                           2  之后运行的时候 通过url  先确定内存中是否有.   内存缓存使用lrucache,里面通过键值对的方式保存图片，按照最近最少使用原则删除图片。需要设置一个保存的最大值。
+                           3 如果内存中没有，加载磁盘里面的，如果磁盘里面没有 再重复1
+
+
+
+
+断点续传： 
+1个下载任务过来，先通过OkhttpClient拿到response,，获取到他的大小，然后在数据库里查找是否下载过（使用url判断，如果下载过对应文件的URL，文件路径文件名字都会存储在数据库）
+，如果找到了。说明下载过，拿到他的长度，对比，如果没有下载完，重新构建requset.builder.addhead(“range”,”bytes=”+下载过得长度+“-”+总长度)；根据request，可以拿到
+Call,然后把<URL，call>存入hashmap如果要取消任务，通过url拿到call,调用call.cancle。取消任务或者完成任务，把call从hashmap移除。 通过call.excute();
+拿到response.body.byteStream,一边读数据一边写(fileouyputSteam.write，如果是接着上次的任务下载的话，在构建输出流的时候构造方法添加一个True,代表在源文件的后面添加数据)到
+对应路径，byte[]缓冲数据,并且通过handler将当前下载进度传递出去更新UI。
+
+
+handler:
+作用：实现消息的管理和线程间的通信。
+流程：  与looper 和 messegequee 配合实现(handler类中存在两者的引用)，在handler初始化之前通过looper.prepare实例化looper和MessageQuee（调用Looper的构造方法，构造方法中初始
+化队列）并且将此Looper实例存入到looper类中的静态变量ThreadLocal中（保证线程间数据的隔离）,在Handler构造方法里（拿到当前线程的Looper对象，并且通过此对象拿到队列对象）
+当通过handler.sendmessage发送Message的时候系统会先将信息的一个target属性设置为发送消息的handler,然后存入queue中，looper.loop会不断的尝试从queue中取信息
+（当队列满了会阻塞发送消息的线程，当队列为空会阻塞接收信息的线程），将取出来的Message.target.dispatchMessage(msg)方法中再调用了handleMessage(方法)实现了线程间的通信。
+主线程的looper初始化调用的是prepareMainLooper.
+线程切换：
+Looper.loop拿到当前线程prepare的Looper对象，开启死循环从队列中读取消息并且执行消息。所以无论在哪个线程调用sendMessage，消息存到队列里面取出来执行会切换到handler初始化的
+线程，这样就完成了线程切换；调用MessageQueue.next():进入死循环，直到获取到message或者退出。如果队列为空，会阻塞到直到有消息入队列。如果有消息会计算下一个消息的时间，是否
+需要等待，不需要等待直接返回Message。nextPollTimeoutMillis控制阻塞时间，0表示不阻塞。
+MessageQueue中维护了一个优先级队列，根据时间和加入数据的顺序排序。
+Message.obtai来创建消息，通过recycle回收。
+MessageQueue.IdleHandler 在ui线程处理完所有view 事物后回调一些额外操作。在next方法中，当队列为空或者下一个消息
+的发送时间还没到，会执行这个接口的里面的方法。
+避免内存泄漏：使用静态内部类，并持有当前Activity的弱引用。handler不使用的时候调用removecallbackandmessaaages();
+ThreadLocal:用于多线程开发场景；能够将数据封装在各自的线程中，同时ThreadLocal本身可以被多个线程共享使用（保证线程间数据隔离）； set方法是拿到当前线程的
+ThreadLocal.ThreadLocalMap对象，然后以自身为key,存储到map里面去；
+同步屏障：Message的target为空（没有指定handle）的消息就是同步屏障，他不会被消费仅仅是作为一个
+标识存在MessageQueue中，当队列的next方法遇到同步屏障，就会忽略其他消息，只寻找队列中标记为一部
+消息的Message，这样异步消息就提前执行了。可以通过MessagQueue的postSyncBarrier添加一个同步
+屏障，通过removeSuncBarrier移除。Message。setAsychronous方法设置为true，可以把消息标记为异步。
+
+handlethread:创建一个包含looper的线程；用作多线程通讯；
+AsyncTask:是通过java的线程池来实现异步任务，通过handler实现线程间的切换；
+
+自定义控件/View的绘制流程：
+1PhoneWindow是Android系统中最基本的窗口系统，每个Activity会创建一个；PhoneWindow也是Activity和View系统交互的接口。DecorView本质上是一个FrameLayout，是Activity中所有View的祖先。
+2在ActivityThread中，当Activity对象被创建完毕后，会将DecorView添加到Window中，同时会创建ViewRootImpl对象，并将ViewRootImpl对象和DecorView建立关联
+3绘制会从根视图ViewRoot的performTraversals()方法开始，从上到下遍历整个视图树，每个View控件负责绘制自己，而ViewGroup还需要负责通知自己的子View进行绘制操作
+流程： 构造函数，一般在这里初始化一些信息，一参数的new的时候调用，两参数的在LAYOUT文件中的时候调用，通过attributeset可以拿到所有属性
+（自定义属性，通过typeArray=context..getthem.obtainStyledAttributeset()）.     
+Onmeasure() 参数是两个通过measurespec打包的32位int值，高两位代表SpecMode(某种测量模式),低30位代表SpecSize（某种测量模式下的规格大小）；
+测量模式有3种，unspecified表示父控件对子控件没有任何限制；exactly表示父控件已经检测出子控件所需要的大小，这个大小就是Specsize,对应match_parent和具体数值的宽高；at_most
+表示父容器指定了一个大小SpecSize,view的大小不能大于这个数值；子控件的measurespec由父控件的measurespec和子控件的layoutparams共同决定，通过getchildmeasurepsec方法生成；
+测量过程：如果是view的话，只需根据参数测量自己的大小并且通过setMearsureDimen设置即可；如果是viewgroup要根据排布规则，遍历子控件测量子控件的宽高，然后结合measurespec
+测量自身宽高（这里最好直接用Linearlayout举例子）；
+普通view的measureSpec生成规则（getchildmeasurepsec）：父控件SpecMode为at_most,子控件只有写死宽高或者parentsize两种情况；父控件SpecMode为exactlys,
+子控件只有写死宽高或者parentsize两种情况；
+Onsizechanged() 第1，2个参数为View的最终大小,子控件的宽高还受父控件的影响
+Onlayout()，确定布局的函数。一般重写此方法都是循环取出子View 然后调用child.layout(l,m,r,b);确定子View的位置左上角和右下角的
+坐标。
+Ondraw()，绘制的内容，View的显示。Canvas 提供了绘制图形，图片，路径path,画布操作（）等大量API。
+
+ 四大组件 必须注册
+  Activity展示一个与用户交互的界面； 通常就是一个单独的屏幕，通过Intent进行通信
+  生命周期：
+  正常启动关闭 生命周期：onCreate onStart  onResume(获得焦点)    onPause（失去焦点）  onStop完全被遮盖   onDestroy  
+  屏幕旋转：on pause()  onSaveInstanceState(Bundle)保存数据  onstop  onDestroy  oncreate  onstart     onRestoreInstanceStat获取保存的数据 onResume
+                  当在清单中设置了configChanges="orientation|screenSize"  旋转屏幕时候只会运行onConfigurationChanged方法，不会销毁-创建Activity;
+                  在清单中设置screenOrientation，可以设置屏幕强制竖屏或者强制横屏；   
+
+  按HOMe键盘   onpause onSaveInstanceState onstop   onstart  onresume
+  四种启动模式 1 standard 默认 每次启动创建一个新的实例 
+                       2SingTop 当一个此模式的Activity已经在寨顶 再次启动的时候不会创建新的实例
+                       3 SingleTask 当一个此模式的Activity已经在栈顶则跟Singtop一样 如果在占中则把他上面的顶出去，让这个Avtivity来到栈顶。如果没在占中，则新建一个压入栈顶。
+                       4SingleInstance 系统中只有一个Activity，独占一个站，直接复用。
+ Activity事件分发机制：android事件主要通过递归的方式分发。 首先一个事件被封装成motionevent分发到activity.getwindow->window.decorview->view树。分发过程主要通过
+dispatchTouchevent实现，这个方法返回boolean值表示事件是否被消费。分发过程中，如果事件分发到view已经没有子控件，那么在这一层会通过调用ontouchevent方法消费事件；
+如果分发到的view有子控件，viewgroup重写了dispatchTouchevent方法，先将事件分发给子控件，如果子控件消费事件，直接返回true,如果子控件不消费，就调用自己的ontouch
+event进行消费； 不是每个事件的分发需要递归，消费了down事件的view会直接消费接下来直到up之间的事件；viewgroup可以通过onterceptTouchEvnt方法拦截事件。
+
+Activity启动流程源码分析：
+ActivityManagerService(以下简称AMS))是Androids上层系统中最核心的服务之一，主要负责系统中四大组件的启动、切换、调度及应用程序的管理和调度等工作；
+Instrumentation ：负责 Application 和 四大组件生命周期调用
+根Activity
+1Laucher应用进程通过binder调用ATMS系统进程发起打开Activity请求；Activity:startActivity(); Instrumentation:execStartActivity(); IActivityTaskManager：ActvityTaskManagerService:startAcitvity();
+2系统进程system_server对创建Activity的处理：
+  2.1AMS通过socket与Zygote进程通信，请求Zygote创建一个新的进程；
+  2.2App进程创建好之后反射执行ActivityThread的main静态方法，主要是开启looper和创建ActivityThread,并且传递ApplicationThread给AMS。AMS与App进程通过ApplicationThread（继承binder）通讯；
+  2.3AMS调用Instrumentation创建Application，调用Application的attachBaseContext和onCreate方法，Application就创建完毕了；
+  2.4pause上一个Activity,然后创建LacunchActivityItem和 ResumeActivityItem，然后将LacunchActivityItem通ApplicationThread发送给APP进程的ActivityThread
+  2.5回到了APP进程，ActivityThread通过Handler来处理事件，最后通过ActivityThread.handleLaunchActivity方法调用performLaunchActivity方法：
+   2.5.1从ActivityClientRecord获取待启动的Activity的组件信息
+   2.5.2通过mInstrumentation.newActivity方法使用类加载器创建activity实例；
+   2.5.3创建Application对象；完成了window创建；调用Activity的onCreate方法
+ 2.6通过ActivityThread.handleResumeActivity
+  2.6.1通过performResumeActivity方法，内部调用生命周期新建acitivity的onStart、onResume方法
+  2.6.2设置视图可见：通过activity.makeVisible方法，添加window、设置可见。（所以视图的真正可见是在onResume方法之后）
+
+
+
+Service 提供在后台长期运行的服务，用户无感知的。（复杂计算，音乐播放，下载）特点是无用户界面，后台运行，生命周期长
+  生命周期：外部调用StartService-oncreate-onStartCoommand（返回一个整数描述服务被系统杀死后如何继续运行，只有此方法每调用一次startService都会调用）-onDestry 可以调用stopservice关闭服务。
+如果不调用stopservice的话，即使开启这个服务的组件被销毁了，服务也会一直在后台运行；
+                  外部调用bindService=oncreate-onbind-onunbind-ondestory  所有客户端解绑的话服务自动销毁
+onstartCommond四种返回值策略：
+start_sticky:service被系统kill掉，保留service的状态为开始状态并且重新启动，但不保留intent对象；默认；
+start_not_sticky:service被系统kill掉，系统不会自动重启该服务；
+start_redeliver_intent:在1的基础上保留intent;
+start_sticky_compatibility:1的兼容版本；
+  按运行地点可分为远程服务（独立进程，常驻后台如系统服务等）和本地服务（运行在主线程，随着主线程终止而终止），按运行类型可分为前台（有显示通知，优先级较高，
+不会由于系统内存不足被回收)和后台。按功能分为可通信和不可通信。     开启前台服务只要在服务创建的时候调用startForground(1,notification)远程服务
+ 
+
+Broadcast recevier 不同组件不用应用之间传递信息。 应用场景主要是与系统交互，监听电量，电话打入，网络变化等。传递信息包括应用内和应用之间。
+ 使用广播首先要创建一个类继承BroadcastReceiver，并且复写onReceive,默认情况下，广播运行在ui线程，无法处理耗时操作。
+注册广播可以通过在.xml文件里面通过<recevir>标签注册成静态广播，App首次运行后会自动创建一个常驻广播，不受任何组件生命周期影响。 也可以调用context.registerReceiver方法注册，
+但是不用的时候得注销。 8.0后静态广播不再支持。
+广播种类：
+1普通广播：sendBroadcast();
+2有序广播：sendOrderBroadcast();在注册广播的时候可以使用优先级android:priority属性 这个属性的范围在 -1000到1000；优先级高的广播接受者可以选择终止广播继续传递abortBroadcast()
+还可以通过setResultExtras给优先级低的广播传递数据；
+3本地广播：localBroadcastManager.sendBroadcast(Intent)；仅在App内广播；
+原理：
+1广播接受者通过Binder机制在AMS注册；
+2广播发送者通过Binder机制向AMS发送广播；
+3AMS根据广播发送者提供的IntentFilter/Permission在已经注册的列表中找到广播接受者；
+4AMS将广播发送到广播接受者的消息循环队列中；
+5广播接受者通过reciver方法拿到广播；
+广播指定权限：
+1在清单里面申明权限；<permission   android:name="com.self.permission.recv_broadcast"  android:protectionLevel="normal" />
+2发送广播的时候指定权限sendBroadcast("com.xxx.xxx.action","com.self.permission.recv_broadcast");
+3注册广播接受者的时候添加权限；registerReceiver(receiver, "com.self.permission.recv_broadcast",null);
+
+ContentProvider
+优点：
+1对数据进行封装，并且提供统一的接口；数据源可以来自本地数据库，可以来源于网络，也可以来源于文件；
+2提供了进程间数据共享的方式； 
+使用：
+1首先要注册，name,authorities（唯一表示，ContenResolver通过此表示访问）,exported。
+继承ContentProvider类，实现Oncreate，增删改查。一般会配合UriMatcher和contentResolver工作。
+2ContentProvider 的 onCreate() 是运行在 UI 线程的，而 query() ，insert() ，delete() ，update() 是运行在线程池中的工作线程的
+ContentProvider 和调用者在同一个进程，ContentProvider 的方法（ query/insert/update/delete 等 ）和调用者在同一线程中；
+ContentProvider 和调用者在不同的进程，ContentProvider 的方法会运行在它自身所在进程的一个 Binder 线程中。
+3UriMatcher.addUri()和.match()添加uri和匹配uri识别contentResolver那边的意图。
+4ContentResolver可以为不同URI操作不同的ContentProvider中的数据，外部进程可以通过ContentResolver与ContentProvider进行交互。主要通过匹配uri里面的authoreis和注册时候的authoreies来确定
+哪一个provoer来响应。 增删改的方法会引起数据源的改变，需要通过ContentResolver的notifychange方法通知外界；
+5ContentObserver:观察ContentProvider中的数据变化；外界可以通过ContentResolver的registContentObserver来注册观察者；
+URI4部分：（通信协议）
+1标准前缀；
+2URI的标识，定义了是哪一个contentprovider提供这些数据；就是authors;
+3路径，标识需要访问哪些表或者数据；
+权限：
+1android:exported 果设置为 true，则能够被其他进程调用或交互。false 时，只有同一个应用程序的组件或带有相同用户 ID 的应用程序才能启动或绑定该服务。
+2通过permission定义权限，其他应用要访问这个contentprovider必须申明这个权限。
+3于需要开放的组件应设置合理的权限，如果只需要对同一个签名的其它应用开放 ContentProvider ，则可以设置 signature 级别的权限。
+
+Fragment:
+1模块化，可以把Activity里面的代码分解到多个Fragment中；
+2可重用；
+生命周期起：onAttach(),onCreate,onCreateView(创建布局),onActivityCreated(); onstart;onresume;onPause;onstop;OnDestroyVIew(移除)；Ondestroy（销毁）onDetach();
+通过fragmentmanager管理生命周期，通过replace（）加载fragment；
+使用：
+1布局文件中的fragment加入name属性；
+2通过FragemntManager和fragmentTransaction的add；
+3add 覆盖原 fragment 添加入一个新 fragment 后, 原来的 fragment 仍然存活；
+replace 是先 remove 掉相同 id 的所有 fragment 然后在 add 当前的这个 fragment；
+viewpager使用：
+1使用ViewPager切换Fragment时，默认会提前加载出下一个位置Fragment，与当前位置间隔超过1的Fragment会被销毁
+2FragmentStatePagerAdapter，那么不仅会销毁Fragment的视图，而且也会销毁Fragment对象(onDeatch)
+3FragmentPagerAdapter，那么只会销毁Fragment的视图，不会销毁Fragment对象（ondestroyview）适合fragment更少的情况；
+4Fragment的销毁是在Adapter的destroyItem()方法中声明的可以复写，就不会回收fragment了；
+5viewpager.setOffscreenPageLimit(int limit)。该方法的作用就是设置ViewPager的预加载页面数量，同时也决定了ViewPager能够缓存的页面数量
+fragment懒加载：
+1延迟加载，按需加载；
+2当我们是通过调用hide()和show()方法来实现Fragment的切换时，不需要做额外的操作即可实现懒加载。
+3当调用replace()实现Fragment的动态显示时，会销毁不可见的Fragment
+4setUserVisibleHint()方法只有在使用ViewPager管理Fragment时才会调用，有一个参数isVisibleToUse
+5onHiddenChanged()方法只有在利用FragmentManager管理Fragment，并且使用hide()和show()方法切换Fragment时才会被调用;参数hidden，表示Fragment是否隐藏
+
+
+ViewPager2:
+1内部使用RecyclerView实现，可以把VP2理解为每个ItemView都充满全屏的RecyclerView
+2水平、垂直方向布局支持；可修改Fragment集合；支持局部刷新；
+3因为VP2内部是RecyclerView实现的，所以简单的界面直接继承RecyclerView.Adapter；
+4如果用到了Fragment，那么需要使用FragmentStateAdapter；
+5onResume()只会在当前Fragment可见时执行，所以用一个Boolean字段来控制只执行一次数据请求。（懒加载）；
+6所以官方并没有对VP2的嵌套滑动进行处理，需要开发者进行自行处理，这里可以通过事件传递中的内部拦截法(requestDisallowInterceptTouchEvent())进行处理，如果嵌套滑动中
+的内部控件需要滑动时，就控制外部父控件不拦截事件，设置为requestDisallowInterceptTouchEvent(true)；反之则让外部父控件拦截事件，设置为requestDisallowInterceptTouchEvent(false)
+7使用recyclerview的缓存机制；
+
+recyclerview:灵活的显示列表数据；
+1ViewHolder 负责存储 RecyclerView 中每一个单独的表项所需要显示的信息；
+2Adapter 类从数据源获得数据，并且将数据传递给正在更新其所持视图的 ViewHolder；
+3缓存机制：
+ 3.1Scrap,屏幕上正在显示的item；不需要重新绑定数据； ArrayList<ViewHolder> mChangedScrap
+ 3.2Cache,刚刚移出屏幕的数据；默认大小是2个，根据position来获取ViewHolde；类似队列，先进先出，出去的ViewHolder放入3.4中；不需要重新绑定；ArrayList<ViewHolder> mCachedViews
+ 3.3ViewCacheExtension，自定义缓存，一般不用；
+ 3.4RecyclerViewPool, 根据itemType获取的，每种viewType的默认缓冲存上线为5，取出来的ViewHolder需要重新onBindViewHolder方法重新绑定数据；SparseArray<ScrapData>；
+4优化：
+ 4.1量化方式可以用GPU呈现模式分析；Window.addOnFrameMetricsAvailableListener()方法可以监听最近 120 帧的绘制耗时;通过frameMetrics获取 measure + layout、延迟、动画、触摸、绘制
+ //4.2动态构建布局
+
+DiffUtils:
+1它主要是为了配合 RecyclerView 使用，通过比对新、旧两个数据集的差异，生成旧数据到新数据的最小变动，然后对有变动的数据项，进行局部刷新。
+2实现DiffUtil.Callback:
+ 2.1getOldListSize()：旧数据集的长度。
+ 2.2getNewListSize()：新数据集的长度
+ 2.3areItemsTheSame()：判断是否是同一个Item。
+ 2.4areContentsTheSame()：如果是通一个Item，此方法用于判断是否同一个 Item 的内容也相同。
+3DiffUtil.DiffResult diffResult = DiffUtil.calculateDiff(new DiffCallBack(oldDatas, newDatas), true);
+  diffResult.dispatchUpdatesTo(mAdapter); 
+  内部其实根据计算结果调用局部刷新方法；
+
+Camera2相关：
+CameraManager:相机管理类，提供CameraCharacteristics(存储了相机的一些信息，比如相机朝向，闪光灯是否可用等)；
+CameraDevice:代表系统摄像头;通过指定模板创建CameraCaptureSession和CameraRequest;关闭相机设备；监听相机设备的状态；
+CameraCaptureSesison:大部分对相机的操作（拍照，连拍）通过此类提交一个capture请求完成；
+CaptureRequest:CaptureRequest 是向 CameraCaptureSession 提交 Capture 请求时的信息载体，其内部包括了本次 Capture 的参数配置和接收图像数据的 Surface。
+可以配置的信息非常多，包括图像格式、图像分辨率、传感器控制、闪光灯控制、3A 控制等，可以说绝大部分的相机参数都是通过 CaptureRequest 配置的。
+值得注意的是每一个 CaptureRequest 表示一帧画面的操作，这意味着你可以精确控制每一帧的 Capture 操作。
+1通过CameraManager拿到可用的cameraId并且打开摄像头,传入CameraDevice.stateCallback（监听相机状态）；根据制定相机id连接相机设备；
+2相机打开成功的监听里面可以拿到CameraDevice对象，通过此对象创建CameraCaputureSession；
+3通过CameraDevice构建预览请求CaptureRequest，并且通过request设置预览的surface，通过CameraCaputureSession给相机发送请求；
+4通过ImageReader监听拍照数据；可以通过getImage.getPlane[0].getbytebuffer转成bytearray;
+
+TextureView:用于显示数据流的View，如本地camera采集的预览数据和实时视频流;在surfaceTextureListener监听里面可以拿到SurfaceTexture;
+Surface surface=new Surface(textureview.getsurfaceTextture);
+
+SurfaceView:拥有独立绘图层surface；通过surfaceholder管理控制；通过surfaceholder.callback来监听surface的状态；
+
+
+
+
+
+android数据库
+主要通过SqLiteOpenHelper类，构造方法设置数据库名字和版本号。
+onCreate(SqLiteDatabase db)方法里面初始化表 create table 表名（字段名 类型 primary key,name text,age integer,）db.excelSql()
+onUpgreade(db,oldversion,newvesion) 升级的时候要考虑新用户只走oncreate,老用户只走升级方法，可以根据oldversion来分别升级
+处理。老表新增字段alter table 表名 add  列名  text/interger 。还有一种方式，把老表改名，创建新表，把老表导入数据到新表，删除
+老表。 alter table 老表名 rename to 新表名 ， create table 表名， insert into book select *from 新表名 ,drop table 新表名。     
+                                     
+
+java反射
+场景：只知道类的路径无法直接实例化的对象，无法操作某个类的私有方法，私有变量等。（需要hook系统逻辑，比如修改某个实例的参数）。
+反射就是对于任意一个类，都能知道这个类的所有属性和方法，对于任意一个对象，可以调用他的任意属性和方法。
+获取Class对象的3种方式
+Class.forName(“包名+类名”);   类名.class;   对象.getClass();
+Class clz=User.class;
+Constructor[] constructors=clz.getConstructors();获取所有构造函数（不包括私有构造方法）
+Constructor[] constructors=clz.getDeclaredConstructors() ;包括私有构造函数。
+getFieds(String name)获取所有publick修饰的成员变量，可以传入参数获取指定名称
+getDeclaredField(String name)  所有成员变量或者指定名称
+getMethods()
+getDeclaredMethods()
+获取某个方法：getMethod(String name,Object... args),参数分别是方法名和参数类型
+反射是可以修改final变量的，但是如果是基本数据类型或者String类型的时候，无法通过对象获取修改后的值，因为JVM对其进行了内联优化。
+调用类的私有方法时候要先调用setAccessible(true)
+缺点：1性能问题 2不够安全
+
+java类加载机制：
+类加载的5个过程：加载，验证，准备，解析，初始化；
+类加载器的作用是根据一个类的全限定名来读取此类的二进制字节流到jvm中，转换为class对象实例；
+java类加载器：BootstrapClassLoader（启动类加载器）ExtensionClassLoader（扩展类加载器）ApplicaitonClassLoader（也叫SystemClassLoader,应用程序类加载器）
+java双亲委派模型：一个类加载器收到了类加载请求，他不会自己先去加载，而是把这个请求委托给父类的加载器去执行；如果父类加载器还有父类加载器，进一步向上
+委托，父类加载器可以完成加载任务，就成功返回，倘若父类无法加载任务，子加载器才会尝试自己去加载；除了启动类加载器，都继承ClassLoader类；
+双亲委派模式作用：共享功能；隔离功能
+
+泛型：
+作用：
+1提高java程序的类型安全；
+2减少代码中的许多强制类型转换；
+Window对View的操作是通过WindowManager来处理的。WindowManager提供在Window上添加View、移除View、更新View的操作。
+然而可见 WindowManager 其实只是一个接口，真正的实现类是WindowManagerImpl
+3编译的时候检查类型安全，并且所有的强制转换都是自动和隐式的，提高代码的重用率。
+场景：
+1集合
+2泛型类；
+3泛型接口；
+4泛型方法；
+泛型使用规则和限制：
+1泛型的类型参数只能是类类型（包括自定义类），不可以是简单类型。
+2泛型的参数类型可以使用extends语句，例如<T extends superclass>。习惯上成为“有界类型”。
+
+window:
+1表示一个窗口的概念，是所有View的直接管理者，任何视图都通过Window呈现(点击事件由Window->DecorView->View; Activity的setContentView底层通过Window完成)
+2Window是一个抽象类，具体实现是PhoneWindow
+3创建Window需要通过WindowManager创建
+4WindowManager是外界访问Window的入口
+5Window具体实现位于WindowManagerService中
+6WindowManager和WindowManagerService的交互是通过IPC完成
+7WindowManager的三个主要功能：添加、更新、删除View
+8Window和View通过ViewRootImpl建立联系；实际使用中无法直接访问Window，必须通过WindowManager
+9Window并不是实际存在的，而是以View的形式存在；View是视图的呈现方式，但是不能单独存在，必须依附在Window这个抽象的概念上
+10WindowManager是一个接口，真正实现类是WindowManagerImpl，并最终以代理模式交给WindowManagerGlobal实现。
+addView: 1-创建ViewRootImpl；2-将ViewRoor、DecorView、布局参数保存到WM的内部列表中；3-ViewRoot.setView()建立ViewRoot和DecorView的联系。
+setView：1-进行View绘制三大流程；2-会通过WindowSession完成Window的添加过程(一次IPC调用)
+requestLayout：内部调用scheduleTraversals(), 底层通过mChoreographer去监听下一帧的刷新信号。
+
+
+java集合
+Arraylist底层用数组保存数据。
+扩容就是传入数组当前长度，只要数组为初始化的时候没有指定容量，就会在minCapacity(size+1)跟DEFAULT_CAPACITY中间取一个最大值，之所以这样，是因为如果将数组的容量设置成太小，
+会导致数组频繁的扩容，影响性能。如果需要的最小数组长度大于此时数组的长度，开始扩容。新的数组长度为当前数组长度+50%，会使用新的数组长度做一些边界的判断，然后使用Arrasy.copyOf(老数组，新长度) 生成新的数组。
+add系列方法和remove系列方法，主要是通过Arraycopy()方法把老的数组数据复制到新的数组里面去。查找方法主要是遍历。
+ArrayList的特点
+有序的，元素可以重复
+查询快，增删慢
+当容量不够的时候，会进行扩容至当前size的1.5倍
+非线程安全
+
+LinkedList是一个双向非循环链表，并且实现了deque接口，还是一个双端队列。
+底层是通过双向链表来实现的，但是并非循环链表。
+不需要扩容，因为底层是线性存储
+增删快，但是查找比较慢
+非线程安全
+
+^两个位相同为0，相异为1.
+&两个位都为1才为1
+hashmap
+数组：遍历块，增删慢。遍历快是因为数组在堆中一块连续的存储空间，遍历数组时的首地址是知道的（地址=首地址+元素字节数*下标）。 增删慢是因为在中间插入或删除元素时候，会造成后面其他所有元素地址的改变。
+链表：增删快。遍历慢。内存空间不连续，每个节点数据除了保存当前数据外还保存下一个节点的引用，插入删除时候只需修改该位置
+红黑树：查找的时间复杂度从O(n)-O(logn)
+的前驱结点和后区节点的指向关系就行。当时查找元素，需要遍历。
+Hashmap:
+数组+链表的结构，当一个链表的长度大于8，链表会转化成红黑树。保证了遍历与增删的过程中，如果不产生hash碰撞的话，一次定位就可以完成。数组的容量必须为2的次幂，每一个扩容为X2。
+hash碰撞：
+在hashmap，数据通过put(key,value)确定的数组下标是通过hash函数传入key并且与数组长度做&计算算出来的(hash(key)&lenght-1)，当不同key算出了相同的数组下标，就是hash碰撞。hashmap解决hash冲突使用的是连地址法，在冲突的地址上生成一个链表，将冲突元素的key比较，相同就覆盖，不同加到末尾。链表过长效率降低通过判断链表的长度是否超过8，超过就转化为红黑树（时间复杂度由O(n)降到了log(n)）。
+putval函数：
+1先判断是否需要初始化数组tab以及确定数组长度。
+2判断tab[(n-1)&hash(key)]位置是否为空，为空的话直接给此位置赋值Node<key value>.
+3位置不为空的话，先判断这个位置的Node的key与要put的key完全相同，则覆盖。 如果这个位置已经有一个树节点：
+如果这个位置是个链表，通过for循环看是否能找到一样key的node,找到的话直接覆盖，不然的话插到这个链表的最后，同时链长度大于临界值的话将链表转化为红黑树。
+4 元素数量大于临界值，扩容。
+treeifyBin将链表转化为红黑树：
+resize扩容函数：
+计算出新的数组容量=oldlenght*2; 新的临界值=old*2;
+初识话新数组Node<k,v>[] new tab=new [new];
+遍历老数组每个元素，如果不是链表也不是TreeNode，直接newtab[e.hash&(newCap-1)]=此元素
+如果此元素为TreeNode:
+如果为链表，那么要遍历链表，确定这个链表里面每一个元素在新的数组里面的位置，如果元素e.hash&oldCap==0，则位置不变，
+否则位置变为扩容前位置+oldcap.这里用了e.hash&oldcap，判断e的倒数第5位是0还是1，如果是0位置不变。遍历的过程中用了两个头结点分别指向不同的链表，遍历完成后制定位置。
+hash函数的实现：
+返回key的hashcode()的高16位异或低16位 key.hashcode()^(h>>>16),减少系统开销，不会造成因为高位没有参与下标计算而引起hash碰撞。
+
+set:元素不重复；无须；
+Treeset:元素不重复；有序；不允许null、
+Hashset：元素不重复；无须；允许null;底层是hash表；
+
+SparseArray
+1SparseArray用于存放键值对，键是int，值是Object。
+2SparseArray用两个长度相等的数组分别存储键和值，同一个键值对所在两个数组中的索引相等。
+3SparseArray比HashMap访问速度更慢，因为二分查找速度慢于散列定位。
+4SparseArray比HashMap更节省空间，因为不需要创建额外的Entry存放键值对。
+5SparseArray中存放键的数组是递增序列。
+6SparseArray删除元素时并不会真正删除，而是标记为待删除元素，在合适的时候会将后面的元素往前挪覆盖掉待删除元素。待删除元素在没有被覆盖前有可能被复用。
+
+
+java强引用：把一个对象赋给一个引用变量，永远不会被垃圾回收；
+软引用：SoftReference,jvm内存够的话不会回收；
+弱引用：随时可能被jvm回收，但是一般不会很快被垃圾回收机制发现；
+软引用和弱引用都用来保存缓存数据；频率高用软，频率低用弱引用；
+虚引用：相当于没有引用；
+
+
+
+android
+ jni
+java层代码调用c++/c，或者被c++/c调用。指两者之间的交互。
+ndk
+一个android的开发工具包，快速开发c/c++动态库，并且自动吧so和应用打包成Apk
+java中的数据类型在c++中一般加一个小写字母j来表示。java的数据类型不能直接在c++中使用。
+在JVM虚拟机中，存储数据类型的名称时，是使用指定的描述符来存储，而不是我们习惯的 int，float 等。
+    Java 类型：String[]
+    JNI 描述符：[Ljava/lang/String;
+    Java 类型：int[][]
+    JNI 描述符：[[I
+方法：（参数）返回值。
+javaVm结构体是java虚拟机在jni层的代表，一个进程只有一个JavaVM.所有的线程公用一个JavaVM
+JNIEnv是一个线程相关的结构体，该结构体代表了java在本线程的执行环境。作用是调用java函数，操作java对象。
+在javaVM结构体中，通过getEnv获得JNIEnv.
+java层通过System.loadLibrary方法可以加载一个动态库，此时会调用jni库中的JNI_Onload函数
+方法注册：
+静态注册：通过java+包名+类名+方法名用下划线分割
+动态注册：通过_JNIEnv的RegisterNatives函数来完成。需要重新JNI_onload函数，在里面手动调用注册函数，借助JNINativeMethod结构体（保存了java方法和
+c++方法的对照映射）。
+java调用c++方法时候，c++方法第一个参数为JNiEnv，第二个参数为java层调用方法的对象转换成c++的jobject。
+c++访问java主要通过一些api getObjectclass  getfieldid  get<type>Filed（获取不同类型的变量的值）
+调用方法的话 先通过获取jmethid获取方法 再通过call<type>Method系列方法调用
+提供了static系列的方法调用静态方法。
+
+
+IPC:
+进程一般指一个执行单元，在移动端一般就指一个应用；一个进程包含最少一个线程；
+Android通过给四大组件制定android:process属性开启多进程；进程名字以“：”开头表示应用的私有进程，没有表示全局进程；
+在一个android应用开启多进程后会导致：1单例和静态变量失效 2线程同步机制失效  3share数据库读写出错可能性变大 4每个进程分配一个独立虚拟机，并且有自己的Application；
+内存序列化上用Parcelable;序列后存到本地或者通过网络传输用Serializable；
+进程通信方式之Binder:
+1.1基于C/S架构，依赖ServiceManager;一个进程使用 BINDER_SET_CONTEXT_MGR 命令通过 Binder 驱动将自己注册成为 ServiceManager；
+1首先服务端定义开放给客户端的接口；
+2然后定义（通过aidl工具生成）一个继承了binder并且实现开放接口的类，并且在此类中定义内部类Proxy也实现开放接口;
+2.1服务端Server 通过驱动向 ServiceManager 中注册 Binder（Server 中的 Binder 实体），表明可以对外提供服务;
+2.2驱动为这个 Binder 创建位于内核中的实体节点以及 ServiceManager 对实体的引用，将名字以及新建的引用打包传给 ServiceManager，ServiceManger 将其填入查找表。
+3Proxy对象通过asinterface提供给客户端；
+3.1 Client 通过名字，在 Binder 驱动的帮助下从 ServiceManager 中获取到对 Binder 实体的引用，通过这个引用就能实现和 Server 进程的通信。
+4绑定远程服务的客户端通过binder调用远程服务开放的方法；
+5客户端调用Proxy实现的方法，调用线程挂起，直到远程服务返回结果；
+6客户端的入参通过
+asinterface方法：如果客户端和服务端在同一进程，直接返回定义的binder类否则返回proxy代理类；
+proxy实现的开放接口方法：构建入参parcel和出参parcel；将输入参数写入入参parcel中，调用transact发起远程调用；从出参parcel中取出调用结果；
+ontransact:客户端发起远程请求时候，这个方法处理请求；参数分别为code方法表示，方法入参parcel，出参parcel;主要内容就是拿到入参，根据code执行目标方法，向出参中写结果；
+注册远程listener可以通过remotecallbackList类来处理；
+可以在onServiceDisconnected中重连远程服务；
+远程服务可以通过添加自定义权限的方式做验证，重写Onbinder方法，在Intent里面拿到相关权限做校验就行；
+
+
+Binder 机制
+Andorid Binder机制
+优点：1相对于socket,管道和消息队列来说，数据内存拷贝的次数少1次，效率更高。
+          2 稳定性好
+          3安全性高，binder机制下binder通信时会根据UID/PID进行有效监测。
+从机制上来说 Binder=一种实现跨进程通信的方式
+从模型上来说 Binder=一种虚拟的物理设备驱动，连接service,client,servicemmanager。
+从代码上来说，binder是一个实现了Ibinder接口的类。
+Client :使用服务 Server:提供服务 ServiceManager:管理Service注册和查询 Binder驱动：传递进程间数据
+1操作系统逻辑上将虚拟内存分为了用户空间和内核空间。普通应用程序在用户空间，
+系统内核运行在内核空间。用户空间只能通过系统调用的方式访问内核空间，此时为内核态，
+普通状态下为用户态。
+2传统IPC为过程为 首先发送方把数据放在内存缓存区，通过系统调用，内核程序通过copy_from_user
+函数将数据从发送方内存缓存区拷贝到内核程序开辟的内核缓存区，然后通过ropy_to_user将数据拷贝
+到数据接收方进程的内存缓存区。这种方式性能比较低，数据需要拷贝两次。
+3binder以模块的方式存在内核之中，模块是具有独立功能的程序，可以被单独编译但是不能单独运行，
+它在运行时候被连接到内核作为内核的一部分在内核空间运行。
+4binder借助内存映射，只用一次数据拷贝实现IPC,内存映射是指将用户空间一块内存区域映射到内核空间，
+用户对映射区域的修改可以直接反应到内核空间，内核空间对这块区域的修改也可以反应到用户空间。
+5Binder通信过程为Binde驱动在内核空间创建一个数据接收缓存区，然后建立数据接收缓存区和内核内存
+缓存区的映射关系同时建立数据接收缓存区和数据接收方内存缓存区的映射关系，数据发送方通过系统调
+用copy_from_user函数将数据从发送方内存缓存区拷贝到内核缓存区，由于内存映射的关系，相当于直接
+把数据拷贝到接收方内存缓存区。由此完成了一次IPC。
+6Binder通讯基于Client/Server架构，调用方为Client进程,被调用方为Server进程，还需要
+ServiceManager和Binder Driver的参与。 C/S需要自己实现，SM和BD系统提供。
+Binder Driver负责进程直接Binder通信的建立，Binder在进程之间的传递，数据包在进程之间的传递和交互
+等一些列底层支持。
+ServiceManager，Sever通过ServiceManager注册Binder。Client能够通过Binder名字从ServiceManager
+获得对Binder实体的引用。  Binder Driver为注册的Binder创建位于内核中的实体节点以及SM对Binder实体
+的引用。 进程通过BINDERSETCONTEXT_MGR命令将自己注册成SM时候BD会自动为他创建Binder实体。
+所有非SM进程对SM来说都是CLient,通过获得这个自动创建的Binder与SM通信。
+某个进程使用 BINDER_SET_CONTEXT_MGR 命令通过 Binder 驱动将自己注册成 ServiceManager，负责
+管理所有的 Service，各个 Server 通过 Binder 驱动向 ServiceManager 注册 Binder 实体，表明自己可以
+对外提供服务，这时 Binder 驱动会为这个 Binder 创建位于内核中的实体节点以及 ServiceManager 对该
+节点的引用，并将名字和该引用打包给 ServiceManager，ServiceManager 接收到数据包后将数据包中的
+名字和引用填入查找表中。Client 通过上面 Server 的名字在 Binder 驱动的帮助下从 ServiceManager 
+中获取到该 Server 对应的 Binder 引用对象，由于该引用对象同样具有 Server 的能力，因此 Client 可以
+通过这个引用与真实的 Server 进行交互。
+
+序列化：
+序列化：将数据结构或对象转成二进制串的过程；
+主要用于传输数据，持久化数据；
+反序列化：将数据结构或对象转成二进制串的过程；
+Serializable：
+1static静态变量和transient 修饰的字段是不会被序列化的
+2serialVersionUID；用来表明类的不同版本间的兼容性。如果你修改了此类, 要修改此值。否则以前用老版本的类序列化的类恢复时会报错：InvalidClassException
+3如果某个序列化类的成员变量是对象类型，则该对象类型的类必须实现序列化
+
+Parcelable：
+1Parcel提供了一套机制，可以将序列化之后的数据写入到一个共享内存中，其他进程通过Parcel可以从这块共享内存中读出字节流，并反序列化成对象
+2Parcelable通过Parcel实现了read和write的方法,从而实现序列化和反序列化
+3Parcelable和Serializable都是实现序列化并且都可以用于Intent间传递数据,Serializable是Java的实现方式,可能会频繁的IO操作,所以消耗比较大,但是实现方式简单 Parcelable是Android提供的方式,
+效率比较高,但是实现起来复杂一些 , 二者的选取规则是:内存序列化上选择Parcelable, 存储到设备或者网络传输上选择Serializable
+
+
+Socket:
+1支持tcp协议和udp协议；
+2tcp协议是面向链接的，稳定性比较高；udp是无连接的，不稳定但是效率高；
+3服务端通过新建ServerSocket(端口号)初始化，通过调用acept方法监听相应端口号客户端链接；每一个客户端链接会返回一个socket链接；
+4当客户端断开链接，socket的输入流会返回null，可以在此回收链接资源；
+
+
+动画：
+帧动画：按顺序播放一组图片；通过xml文件来定义一个AnimationDrawble;然后作为view的背景；
+view动画：主要是对应平移，缩放，旋转和透明度四种，只能作用于view；可以通过xml文件或者代码创建；可以用作activity和fragment的切换（overpeddingtrastion）；
+属性动画：可以作用于任何对象；可以达到的效果是在一个时间段内完成对象的一个属性值到另外一个属性值的变化；
+属性动画关键类：ValueAnimator ObjectAnimator  AnimatorSet ;通过ofFloat(对象，对象属性名，属性初始值，属性结束值)；
+要控制动画的速度变化，可以用插值器，系统预设了LinearInterpolator
+
+
+
+
+mvp/mvc      
+  Controller、Presenter、ViewModel，对应着三种不同的解耦方案，三种与 M 和 V 的连接方式。
+  M层数据层 网络请求，处理数据，业务逻辑
+  V层 视图层 
+  C层  控制M层，回调数据给V 层显示    缺点是VC两层的代码都在Activity中，同时持有M层的引用；
+  View 与 Controller 之间则用了策略模式，Controller 对象为一个或多个 View 对象实现了策略，View 对象仅限于保持其视觉外观，而与程序逻辑相关的所有决策都委托给 Controller，
+即 View 可以使用不同的 Controller 实现，得到不同的行为。Model 与 View 之间则使用了观察者模式，View 会注册为 Model 的观察者，当 Model 有变化的时候，就能通知到 View。   
+
+  MVP 
+  V与M层不会有通讯（引用）完全分离 。 V层与P层通过V实现接口的方式进行通讯。强化P层。
+  VP两层互相引用；PM层互相引用； 
+  MVP 之间的交互主要是通过接口实现的，Model、View、Presenter 都有各自的接口，定义各自的行为方法。针对接口编程;
+ 
+  MVVM
+  model-view-viewmodel  
+  MVVM 的关系图和 MVP 很相似，model和view完全分离， 最大的不同在于 View 和 ViewModel 之间主要是通过数据绑定的方案来实现交互的。
+
+jetpack&&mvvm:
+ViewModel、
+LiveData、
+DataBinding
+
+eventbus:
+1android平台上基于订阅\发布模式（观察者模式），在组件 / 线程间通信的场景中，将数据或事件传递给对应的订阅者。；
+2使用简单，可以指定接受事件的函数运行的线程（threadmode）,解耦；
+3需要接收数据的地方调用 EventBus.getDefault().register(this);
+4使用@Subscribe注解接收数据的方法，这个注解是作用于方法的运行时注解，存在3个基础属性：
+  4.1threadMode() = 函数运行的线程，
+  4.2sticky(ture/false) = 一般情况下，发布者将事件发出，如果没有对该事件感兴趣的订阅者，那么这条消息就消失了；而粘性事件则允许，在订阅者后来
+注册到事件中心，还能收到该事件。  EventBus.getDefault().postSticky(new DownloadEvent());
+  4.3priority() = 事件优先级,优先级越高的方法，越早接到post传过来的数据；
+5调用 post(Object event) 发送 Object 类型事件。如果需要发送粘性事件则调用 postSticky(Object event)
+6EventBus.getDefault().cancelEventDelivery(event) ;取消事件分发；
+原理：
+1注册流程：
+  1.1通过反射拿到注册对象class所有的方法getDeclaredMethods()；
+  1.2遍历方法，通过 method.getModifiers()（修饰符），method.getParameterTypes()（参数类型），method.getAnnotation（Subscribe.class）（获取注解）；获取到注册对象中
+使用@Subscribe注解的方法；然后将注解信息(运行线程，是否粘性，事件优先级)，方法(Method)，事件类型 封装成 SubscriberMethod 保存到一个列表中；
+  1.3 遍历SubscriberMethod的列表，逐个绑定的操作：
+     1.3.1：注解方法参数class为key,注解方法本身 SubscriberMethod和注册对象构成的新对象列表（列表按照SubscriberMethod排序）为value构建map;作用:post（参数类型）的时候根据参数class从map中所有已经注册的对象；
+     1.3.2:  注册对象为key,  注册对象中所有的注解方法的参数类型列表为value构建map;作用：用于查询是否已经注册了当前对象；解绑注册 ；
+     1.3.3:  将粘性事件以参数class为key单独构建一个map保存;根据事件类型在粘性map中查找粘性事件；调用post方法，使得注解方法能够接收之前发送的粘性事件；
+2post发送流程：
+  2.1：通过发送数据class找到已经注册的列表，找到列表之后遍历，找到注册对象的目标method，
+  2.2：根据method指定的运行线程，按需要做一些线程切换的操作，然后通过反射调用 method.invoke(方法所在对象,方法参数)。
+  2.3：发送粘性事件的时候保存到缓存map中，延时（需要时）再取
+3解绑：
+  3.1通过解绑对象找到解绑对象注册的所有事件类型（参数类型），再根据事件类型class找到注册该事件类型的list，查看该解绑对象是否在列表中，是的话就从列表中移出；
+
+注解：
+1可以使用注解做语法检查
+2使用注解可以减少重复且易出错的样板代码
+3使用注解可以在运行时获取一些配置信息
+4使用注解可以生成帮助文档
+语法：
+1 interface 前面必须加上 @ 符号；public @interface SuppressWarnings
+2 需要一些元注解：@Target 和 @Retention；元注解就是专门负责注解其他注解的注解，或者说专门负责新注解创建的注解。
+   2.1@Target 表示该注解可以用于什么地方。如果不写 @Target 注解，表示该注解可以用于所有的 ElementType。可能的 ElementType 参数包括：
+         CONSTRUCTOR：用于构造器的声明；
+         FIELD：用于域声明（包括 enum 实例）；
+         LOCAL_VARIABLE：用于局部变量的声明；
+         METHOD：用于方法的声明；
+         PACKAGE：用于包的声明；
+         PARAMETER：用于普通参数的声明；
+        TYPE：用于类、接口（包括注解类型）或 enum 声明；
+        ANNOTATION_TYPE：用于注解的声明；
+        TYPE_PARAMETER：这是 Java 1.8 加入的，用于类型参数的声明；
+        TYPE_USE：这是 Java 1.8 加入的，用于一个类型的使用。
+  2.2@Retention 表示需要在什么级别保留该注解信息。可选的 RetentionPolicy 参数包括： 
+      SOURCE：表示注解仅在源码中可用，将会被编译器丢掉；
+      CLASS ：表示注解会被编译器记录在 class 文件中，但在运行时虚拟机（VM）不会保留注解。这也是默认的行为。
+      RUNTIME：表示注解会被编译器记录在 class 文件中，而且在运行时虚拟机（VM）会保留注解。所以这里可以通过反射读取注解的信息
+
+3 注解的元素看起来很像接口的方法，但是可以给元素指定默认值。
+
+rxjava:
+1一个基于事件流、实现异步操作的库；
+2基于事件流的链式调用，逻辑简洁；
+3被观察者 （Observable） 通过 订阅（Subscribe） 按顺序发送事件 给观察者 （Observer）， 观察者（Observer） 按顺序接收事件 & 作出对应的响应动作
+4基本使用：
+ 4.1创建被观察者Observable，通过Observable.create()传入ObservableOnSubsribed对象，复写subscribe方法，在这个方法里生成事件（调用next，onComplete等）；
+ 4.2创建观察者Observer并且定义响应事件的行为；复写Observer里面的方法OnSurscrible,onNext,,onComlete,onError;
+ 4.3通过Observable.subscribe(Observer)链接；
+ 4.4Observable.subscribe()具备多个重载方法，可以传入不容参数控制观察者只对被观察者发出的某个事件作出响应；	
+ 4.5可以通过Disposable.dispose();切断观察者和被观察者的联系；
+5创建操作符：
+ 5.1Observable.just（）快速创建 被观察者对象（Observable） & 发送10个以下事件；
+ 5.2fromArray（）快速创建1个被观察者对象（Observable）&直接发送 传入的数组数据；
+ 5.3fromIterable（）快速创建1个被观察者对象（Observable）&直接发送 传入的集合List数据；
+ 5.4defer() 直到有观察者（Observer ）订阅时，才动态创建被观察者对象（Observable） & 发送事件
+ 5.5timer（）快速创建1个被观察者对象（Observable）&延迟指定时间后，发送1个数值0（Long类型）
+ 5.6interval（）每隔指定时间 就发送 事件；发送的事件序列 = 从0开始、无限递增1的的整数序列
+ 5.7intervalRange（）每隔指定时间 就发送 事件；可指定发送的数据的数量
+ 5.8range（）作用类似于intervalRange（），但区别在于：无延迟发送事件
+6功能操作符：
+ 6.1 delay()使得被观察者延迟一段时间再发送事件;
+ 6.2 do操作符 在某个事件的生命周期中调用；
+ 6.3 retry（）重试，即当出现错误时，让被观察者（Observable）重新发射数据；
+ 6.4subscribeOn()指定被观察者Observable的工作线程；多次指定被观察者 生产事件的线程，则只有第一次指定有效
+ 6.5observeOn()指定观察者的Observer的工作线程；多次指定观察者 接收 & 响应事件的线程，则每次指定均有效，即每指定一次，就会进行一次线程的切换
+ 6.6通过Scheduler类来指定具体工作线程，内部维护了线程池；
+7过滤操作符/变化操作符：
+ 7.1Filter（） 过滤 特定条件的事件
+ 7.2map（）拦截被观察者所有的发送的事件做处理后再发送给观察者
+ 7.6flatmap() 将被观察者发送的事件序列进行 拆分 & 单独转换，再合并成一个新的事件序列，最后再进行发送
+8场景：
+1轮询interval;
+2发送网络请求 & 通过retryWhen（）进行重试;主要异常才会回调retryWhen（）进行重试
+3网络请求嵌套，主要使用flatmap
+4Merge（）操作符;实现较为复杂的合并2个网络请求向2个服务器获取数据 & 统一展示
+
+9背压：观察者 & 被观察者 之间存在2种订阅关系：同步 & 异步。具体如下：
+  9.1同步：两者在同一个线程，被观察者发送一件事必须等观察者处理完毕才能继续发下一件；
+  9.2异步：两者不在同一个线程；被观察者 发送事件速度太快，而观察者 来不及接收所有事件，从而导致观察者无法及时响应 / 处理所有发送过来事件的问题，最终导致缓存区溢出、事件丢失 & OOM；
+  9.3flowable(被观察者)和subscriber(观察者)，支持背压功能
+  9.4通过 BackpressureStrategy对缓存区满的情况下做策略处理：
+     9.4.1error:直接报错
+     9.4.2missing:提示，会报错
+     9.4.3buffer：把缓存区扩容成无限大
+     9.4.4drop:超过后，再发过来的事件直接丢弃
+     9.4.5latest只保存最新的事件 
+
+10基本订阅流程：
+Observable -> 装饰器模式的基类，我们称其为装饰器。有一个create方法，参数是一个ObservableOnSubscribe发射源，会返回一个ObservableCreate对象。
+ObservableCreate -> 装饰器实现类。有一个subscribe方法，参数是Observer处理器。在subscribe方法内部，我们以Observer为参数生成了一个CreateEmitter发射器，并且将这个发射器作为参数，调用了发射源的subscribe方法。
+ObservableOnSubscribe -> 发射源，本身只是一个接口，我们重写了subscribe方法，定义了接下来要处理的事件，所以称其为发射源。
+CreateEmitter -> 发射器，构造方法中包含一个处理器。处理器持有这个发射器对象，可以随时中断发射过程。发射器中的onError和onComplete两个是互斥的，只会执行一个。
+Observer -> 处理器。用于处理发射器发送的数据。
+1.Observable调用create方法，参数是一个发射源ObservableOnSubscribe（我们对其subscribe方法进行重写），生成一个ObservableCreate对象。
+2.ObservableCreate调用subscribe方法，参数是一个处理器Observer。
+3.在subscribe方法中我们以Observer为参数生成了一个CreateEmitter发射器，并且将这个发射器作为参数，调用了发射源ObservableOnSubscribe的subscribe方法。
+4.发射源ObservableOnSubscribe的subscribe方法中定义了我们要处理的事件，并将结果传递给发射器CreateEmitter，CreateEmitter先判断事件流是否断开，不断开则将结果传递给处理器Observer。
+5.处理器Observer处理结果。
+
+11线程调度：
+observeOn作用于下游的所有处理器，可以多次调用。每一个处理器所运行的线程，决定于它最近的上游observeOn方法中指定的线程。
+subscribeOn作用于上游的发射源，主要是用来指定subscribe方法所在的线程。针对于发射源，只有离它最近的下游subscribeOn方法中所指定的线程才生效。所以subscribeOn方法多次调用并没有效果。
+onSubscribe()方法并不会跟随内部线程切换而切换线程。运行在哪个线程，只跟外部创建这一整套观察者模式的线程一致。
+
+retrofit:
+1网络请求的工作本质上是 OkHttp 完成，而 Retrofit 仅负责 网络请求接口的封装
+
+屏幕适配：
+像素px：可以理解为屏幕上一个个的小方块，也可以理解为单位
+屏幕分辨率：指长和宽上的像素个数，比如 一个手机长1920px 宽1080px  屏幕分辨率为1920*1080
+屏幕尺寸：对角线的长度
+dpi:就是屏幕尺寸每英寸的像素数，值越大屏幕越清晰。（在每个手机上视固定的） .
+Density(密度) ：density表示每英寸有多少个显示点(逻辑值)，它的单位是dpi：dot per inch，通常屏幕大时，density就大，屏幕小时，density就小，通常
+所以千万不要去区别Density与dpi。一个是物理名称，一个是它的单位。  
+dp/dip一个意思:dp=px*(dpi/160)  也就是dpi=160  1px=dp  
+适配方案：1dp+自适应布局ConstraintLayout
+                2dimens列举所有的屏幕分辨率，以其中某一个为基准，其他的等比例放大或者缩小。就是AutoLayout
+                3今日头条方案 
+
+Android多线程总结
+    线程是cpu的最小调度单位。线程四个属性
+    编号  只读属性，不可修改，用于表示不同的线程
+    名字
+    种类（守护线程和用户线程） 当 JVM 要退出时，它会考虑是否所有的用户线程都已经执行完毕，是的话则退出。
+    而对于守护线程，JVM 在退出时不会考虑它是否执行完成。 守护线程通常用于执行不重要的任务，比如监控其他线程的运行情况，GC 线程就是一个守护线程。
+    优先级 （0-10）线程调度会根据这个来决定优先运行哪个线程。但是不一定会按设定的优先顺序执行线程。
+   线程的类别和优先级会被继承，b继承A  表示A线程里面运行了b.start().
+   start 开启线程   run()任务的具体逻辑，自动调用  
+   join 线程A调用B的此方法，表示A进入等待状态直到B运行结束。
+   Thread.yield 表示当前线程可以让出cpu，但是不一定会进入暂停状态
+   Thread.sleep 当前线程休眠
+   线程生命周期 
+   新建状态NEW（没start）
+   可运行状态RUNNABLE（start） 分为预备Ready，start后可以被调度器调度但是还没有（当线程的 yield() 方法被调用后，线程的状态可能由运行状态变为预备状态）
+和运行Running状态正在执行run方法。
+   阻塞状态 发起阻塞是i/o 申请其他线程持有的锁
+   等待状态  运行Object.wait  Thread.join Thread.sleep 进入等待   object.notify/notifyall  可以唤醒进入可运行状态。 
+   终止状态 执行完毕或者异常
+   线程调度：每个线程有自己的工作内存。对共享内存里面的变量进行操作时会先读取变量到工作内存的共享变量副本。在任意时刻CPU只能执行一条机器指令，也就是
+在任意时刻只有一个线程占据Cpu。 竞态多个线程之间对共享变量交错进行操作时候 。原子性涉及到共享变量访问的操作，在执行线程以外的任意线程看来是原子操作。
+可见性是一个线程对共享变量进行更新后后续变量无法立刻到这个更新的结果。有序性是指一个处理器在为一个线程执行的内存访问操作，对于另一个处理器上运行的
+线程来看是乱序的。
+  线程安全：使用锁。特点 1持有锁的线程获得锁和释放锁的代码区叫临界区2排他性，一个共享变量同一时刻只能被一个线程访问。3锁的调度策略分为公平策略和非公平策略，
+对应的锁就叫公平锁和非公平锁。公平锁会在加锁前查看是否有排队等待的线程，有的话会优先处理排在前面的线程。公平锁以增加上下文切换为代价，保障了锁调度的公平性，
+增加了线程暂停和唤醒的可能性。
+  使用synchronized修饰 类，方法，代码块 。不会导致死锁等所泄露。是非公平锁
+  使用Lock ， Lock.lock，获取锁获取失败会处于阻塞。 Lock.trylock（time，timeout） 指定时间内获取失败会处于阻塞，过了时间直接返回false，不阻塞。 更灵活，使用不当
+会造成所泄露。									
+  volatile 关键字可用于修饰共享变量，被修饰的变量多线程可见
+  原子类AtomicInteger、AtomicBoolean、AtomicReference、AtomicReferenceFIeldUpdater 。
+   线程池：减少资源损耗 提高响应速度 方便管理线程
+   Executors提供 NewCacheThreadPool(缓存线程池) NewfiexdThreadpool（固定线程池） newSingleTHreadExecuro 单线程 NewscheduledThreadpoll固定周期
+   这4个直接或间接通过ThreadpoolExecucor实例，ThreadPollExecucor构造方法有7个参数
+   1 coolPoolSize 核心线程数，即使线程处于空闲也不会销毁
+   2maximunPoolSize 线程池最大线程数量
+   3keepAliveTImer 空闲线程存活时间
+   4unit 空闲线程存活时间单位
+   5workQueue 工作队列
+   6threadFactory线程工厂
+   7handle拒绝策略
+
+ 
+okhttp框架：
+简单使用 1 1获得OkhttpClient对象，构建request ,通过request构建call ,使用call. enqueue 异步请求 call.execute同步请求。
+工作流程 OkhttpClient通过builder构建，通过newCall方法创建Call。当调用Call.execute方法后，先通过synchronized同步代码块{
+如果已经执行，抛出异常。如果没有执行，设定标识executed=true}.这里保证了一个请求只能执行一次。 然后调用client里面dispathcheer的
+execited（this）把请求放入一个双端队列runningSyncCall中，表示正在执行的同步请求，返回getResponsewiteInterceptorChain中。最后请求
+结束会调用Dispather的finish结束请求。如果是异步请求，前面一样。直到dispacher.enqueue(new AsyncCall就是一个runnable)，先把请求放入
+一个准备执行的双端队列readAsyncCalls中，表示等待执行。然后调用Diapacher类的线程调度方法promoteAndExecute ,这个方法主要是遍历准备
+执行的请求队列，如果当前环境允许（最大并发数和相同host并发数满足条件），则加入正在执行的请求队列里面去,并且调用call.executeOn(线程池)，
+放到线程池执行。AsyncCall的run方法也是执行Response=getResponsewithInterceptionChain()
+最终的执行都是在RealCall的getResponseWithInterceptorChain()方法，只不过异步请求 需要先通过Dispatcher进行并发控制和线程池处理。
+一次添加外部配置的拦截器（用户自定义） 
+重试跟进拦截器RetryAndFollwUpInterceptor 处理错误重试和重定向，获取response的时候通过try catch捕获异常，如果捕捉到则通过revover方法判断
+是否需要重连，需要重连的话会return true 继续循环。如果能拿到response根据响应码做相应的处理。
+桥拦截器 BridgeInterceptor 为请request和response添加cook 固定header
+缓存 CacheInterceptor  获取缓存和更新缓存 如果命中缓存（networkrequest==nul
+）则不会发起网络请求. 只要networkrequest不为null，都会下传进行网络请求，如果返回304则
+返回缓存，否则更新缓存（是否更新缓存取决于客户端的策略和响应头的cache-control返回值是否允许缓存，Okhttp默认只缓存get请求的数据）并返回服务器传回来的数据。缓存策略
+通过CacheStrategy来控制，如果有候选响应头，获取它的Expires,cachecontrol,last-modified,etag,然后综合请求的请求头，对比时间和策略确定缓存是否可用。
+l连接 ConnectInterceptor 内部维护一个连接池，负责连接复用，创建连接。 过程在transmitter.newExChange()里面通过ExchangeFinder.findHealthyConnection.会先通过Address
+尝试从连接池拿链接，如果拿不到，则拿到此Address所对应的所有route,遍历routes看是否能从连接池拿到能用的链接，如果还拿不到则·新建连接。但是http2.0会在连接新建立的过程
+继续尝试从连接池拿链接，因为新建链接的握手操作不是线程安全的，所以有可能拿到链接，那么关闭刚新建的链接。
+请求服务 CallSeverInterceptor真正发起网络请求 进行i/o读写。
+通过Chain.proceed 把请求依次传入每个拦截器，最后一个拦截器得到response反向依次回传。
+
+http缓存  是否缓存  expires1.0   Cache-Control 1.1:private public no-cache(跳过当前强缓存直接进入协商缓存)  no-store（不进行任何形式的缓存）
+协商缓存：Last-Modified由服务器返回过来资源最后的修改时间，如果再次请求请求会携带Last-modifild-since（值就是返回的last-modifiled）服务器
+进行比对，如果资源没改动会返回304 。如果有改动就是常规请求。Etag是服务器根据当前文件的内容给文件生成唯一的标识，只要有改动就会变。服务器
+通过响应头把这个传给客户端，客户端下次请求会把这个值作为if-none-match的内容发过去比对，没变304，否则跟常规请求一样。
+
+http1.0  一个请求响应对应一个连接，3次握手，4次回收。 1.1通过keep-alive,请求响应后不会马上断开连接，会有一个保持连接的时间，在这个时间内再
+有同一个host上的请求，可以直接复用连接，连接的复用是串行的。2.0 协议的解析使用二进制格式，1.1是文本协议，2.0支持多路复用。即使用streanmId来
+区分请求，一个tcp链接上可以有多个stram,实现一个链接上的请求并发并且可以调整每个stram的优先级。优化了请求头传输。 

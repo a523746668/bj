@@ -1,0 +1,231 @@
+ 数据结构
+线性表：
+数组 [] 属性 length clone
+链表 每一个数据不仅有数据值还有下一个数据的地址。
+LinkedList<> add(), set(index,''),get(index),contains(""),remove("")
+双向链表  在链表的基础上还多了一个上一个数据的地址。
+队列 数组只能从一端进，从另一端出。 先进先出
+使用这个实现队列Deque<Integer> stack1= new  LinkedList<Integer>();
+尾部入队add（）offer()  头部出队 poll remove 返回第一个元素并且删除。 peek element只返回不删除。 
+栈，栈只能从一端存取数据，另外一端是封闭的。先进后出
+ 使用这个实现栈：Deque<Integer> stack1= new  LinkedList<Integer>();
+push(加到栈顶) pop()从栈顶移除并且返回；
+树：
+二叉树种类：满二叉树，完全二叉树，二叉排序树，平衡二叉树，红黑树，哈夫曼树
+String : char a=s.charAt(index)返回index的字母; equals;indexOf('')位置，length(),split(),
+substring()截取[0,5),toCharArray() 转化成数组
+判断一个字符是否为数字：Character.isDigit(char c) //判断字符c是否是数字字符，如‘1’，‘2’，是则返回true，否则返回false 
+Character.isLowerCase(char c)　|| Character.isUpperCase(char c)　　//判断c是否是字母字符，前面LowerCase是小写，后面UpperCase是大写，是返回True，否则返回False
+Character.isLetterOrDigit(char c)　　//判断c是否是字母或数字字符，是返回true,否则返回false
+还有一个方法要注意一下：
+
+
+hashset:无序，不能添加相同元素；
+Treeset:支持排序；去重；
+遍历方法： 增强for ;  Iterator迭代器； 
+
+
+TreeMap:可以排序，根据key来排序；遍历可以获取keySet；获取entryset;
+HashMap:遍历可以获取keySet；
+
+PriorityQueue:优先队列，默认是升序排列；add();peek(返回队首元素 ；         poll()返回对手元素并且出队；      size()   isEmpty();
+
+Arrays.sort()默认升序 ； Arrays.sort(Object[] array, int from, int to)对数组元素指定范围进行排序
+
+
+冒泡排序
+循环比较两个相邻的元素，如果第一个大于第二个则交换位置。第一轮过后最后一个元素最大，第二轮可以不用比较最后一个。第二轮过后，倒数第二个元素第二大。循环n-1次
+void bubbleSort(int a[], int n){
+    for(int i=0;i<n-1i;i++){
+        for(int j=0;j<n-1-i;j++){
+           if(a[j]>a[j+1]){
+             let temp =a[j]
+             a[j]=a[j+1] 
+            a[j+1]=temp
+      }     
+    } 
+   }
+}  
+选择排序
+在未排序的数列中找到最小值放到这个未排列数据的第一位。每一个循环找到一个最小数，外循环一共n-1次.每一次外循环假设[i]最小
+function selectionSort(arr，n){
+    for(int i=0;i<n-1i;i++){
+        let minindex=i;
+     for(int j=i+1;j<n;j++){
+         if(arr[j]<arr[minindex]){
+           minIndex=j          
+   }
+    let temp=arr[i]
+arr[i]=arr[minindex]
+arr[minindex]=temp         
+  }
+ }
+}
+}
+
+插入排序
+假设前面的元素是排好序的（第一个循环假设第一个数是排好序的），去找下一个元素a[i]，在已经排序的元素序列从
+后向前扫描，只要比a[i]大的，都向后移一位（内循环），直到a[i]找到位置，开始下一个外循环。
+void InsertSort(int a[], int n){
+   for(let  i=1;j<n;i++){
+         if(a[i]<a[i-1]){              
+          let tempindex=i-1
+          let temp=a[i]
+          a[i]=a[i-1]     
+           while(temp<a[tempindex-1]){
+             a[tempinex]=a[tempindex-1]
+             tempindex--
+         }
+         a[tempindex]=temp  
+     } 
+}
+}
+
+快速排序
+
+
+有序表查找 2分法
+ public void binerysearch(int[]  a ,int key){
+       int mid,low,high;
+       low=0;
+       high=a.leght-1;
+       while(low<=high){
+          mid=(low+high)/2   
+          if(a[mid>key]){
+                low=mid+1
+          }else if(a[mid]<key){
+             high=mid-1
+         }else {
+        return mid
+}
+     }
+    return -1
+ }
+
+
+
+二叉树输出第K层节点元素
+class   tree{
+   int data;
+   tree lc;
+   tree rc;
+}
+
+void printK（tree mt,int k）{
+    if(mt==nul||k<0){return}
+     
+   if(k=0) print(mt.data)else {
+    printK(mt.lc,k-1)
+    printK(mt.rc,k-1)
+}
+}
+
+？？？？？？？？？？       二叉排序树
+1如果他的左子树不空，则左子树上所有节点的值均小于它的根节点的值
+2如果它的右子树不空，则右子树上所有节电均大于它的根节点的值
+3他的左右子树也分别为二叉排序树
+构造一颗二叉排序树的目的，不是为了排序，而是为了提高查找和插入删除关键字的速度。
+
+class BinTree {
+   Int data;
+   BinTree lchild;
+   BinTree rchild; 
+}
+
+
+bt 待查询二叉排序树
+Key 查找关键字
+parent  指向bt的双亲 初识为null  
+/** 全局变量 存放查找到的关键字所在的父节点 */
+	static BinTree parentNode = new BinTree();
+
+Public boolean searchBST(BinTree bt, int key, BinTree parent){
+   if(null==bt||0==bt.data){
+        parentNode=parent;
+        Return false  
+    }else if(key ==bt.data){
+        parentNode=bt;
+        Return true  
+    }else if(key<bt.data){
+       return searchBST(bt.lchild,key,bt)
+    }else if(key>bt.data){
+       Return searchBST(bt.rchild,key,bt)
+     }
+}
+总结： 首先判断树节点如果不存在 返回false 
+      查找到了 返回true和bt的parent，
+      如果key小于根节点，查找左子树反之右子树 递归。 
+
+bt:待插入树
+Key 插入数据
+Public  boolean  insertBst(BinTree bt,int key){
+     BinTree s;
+     if(!searchBST(bt,key,null)){
+         s=new BinTree()
+         s.lchild=s.rchild=null;
+         if(null==parentNode){
+          bt=s  
+     }else if(key<parentNode.data){
+           parentNode.lchild=s
+      }else if(key>parentNode.data{
+            parentNode.rchild=s
+
+      }
+    } 
+} 
+
+后序遍历
+preHouxu(Bintree t){
+   if(t!=null){
+    preHouxu(t.left)
+    preHouxu(t.right)
+   print(t.data)    
+  }
+}
+
+先序遍历
+preTraverse(Bintree t){
+   if(t!=null){
+     print(t.data);
+    preTraverse(t.left)
+    preTraverse(t.right)
+  }
+}
+//中序遍历
+preOrderTraverse(Bintree t){
+   if(null==t&&t.data==0){
+     Return ;  
+} 
+   if(null!=t.lchild){
+       preOrderTraverse(t.lchild)  
+  }  
+  if(0!=t.data){
+
+   prinit(t.data) 
+} 
+  if(null!=t.rchild){
+      preOrderTraverse(t.rchild)
+  } 
+   
+} 
+
+ Static binTree newTree=new BinTree();
+//生成一颗二叉排序树
+generateBST(int key){
+   if(!searchBST(newTree,key,null)){
+    BinTree s=new BinTree()
+    s.data=key;
+    S.lchild=s.rchild=null   
+    if(parentNode==null){
+        newTree=s; 
+     }else if(key<parentNode.data){
+       parentNode.lchild=s 
+     }else {
+      parentNode.rchild=s
+     }
+     
+}else {
+Return false   //该节点已经存在
+}
+
+
